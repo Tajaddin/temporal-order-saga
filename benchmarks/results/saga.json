@@ -1,0 +1,8 @@
+{
+  "orders": 200,
+  "completed": 124,
+  "compensated": 76,
+  "terminal_total": 200,
+  "consistency_violations": 0,
+  "all_or_nothing_rate_pct": 100.0
+}
