@@ -50,14 +50,15 @@ Role categories unlocked: **Backend / Distributed Systems**, Platform Engineerin
 
 Durable execution (Temporal, Cadence, AWS Step Functions) is how modern systems run long-lived, fault-tolerant business processes. This repo backs the "Temporal / workflow orchestration" resume line with a real saga, compensation logic, signals, and a fault-injection benchmark that proves the all-or-nothing guarantee.
 
-## Run it
+## How to run
 
-### Tests + benchmark (no server needed)
+Prerequisites: Python 3.10+; Docker (only for the real Temporal server stack). Tests and the benchmark use Temporal's time-skipping test server, which the `temporalio` SDK auto-downloads on first run — no external server needed.
 
 ```bash
 pip install -e ".[dev]"
 pytest                                  # 6 tests on the time-skipping test server
-python -m benchmarks.saga_bench --count 200
+python -m benchmarks.saga_bench --count 200   # all-or-nothing fault-injection hero
+docker compose up --build               # alt: Temporal server + UI + worker + Postgres
 ```
 
 ### Against a real Temporal server
