@@ -21,9 +21,9 @@ from ordersaga.models import OrderRequest
 # Temporal's activity retries can exhaust the injected transient failures.
 _attempts: dict[tuple[str, str], int] = {}
 
-# In-memory payment and inventory services. Like a real payment API they key
-# every call on the caller's idempotency key: a retried charge charges once,
-# and refunding a key that was never charged is a no-op.
+# In-memory stand-ins for the payment and inventory services. They record
+# each charge and reservation under the step's idempotency key, so a retried
+# charge charges once, and refunding a key that was never charged is a no-op.
 charges: dict[str, int] = {}  # idempotency key -> amount_cents, until refunded
 reservations: dict[str, int] = {}  # idempotency key -> quantity, until released
 
