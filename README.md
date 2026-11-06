@@ -1,6 +1,6 @@
 # temporal-order-saga
 
-> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (124 completed, 76 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 9 tests.
+> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (128 completed, 72 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 9 tests.
 
 [![ci](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -17,12 +17,12 @@ python -m benchmarks.saga_bench --count 200
 | Metric | Value |
 |---|---:|
 | Orders run (random fault injection) | 200 |
-| Completed (payment + shipment) | 124 |
-| Compensated (rolled back, no shipment) | 76 |
+| Completed (payment + shipment) | 128 |
+| Compensated (rolled back, no shipment) | 72 |
 | Partial / inconsistent states | **0** |
 | **All-or-nothing rate** | **100%** |
 
-Every order ends in a consistent terminal state. When a step fails permanently, the workflow runs its compensations in reverse, so an order is never shipped without payment, nor charged without shipping. Transient failures self-heal through Temporal's activity retries. The benchmark checks each order against the payment and inventory services' own records (charge and reservation still held or not), not just the workflow's result.
+Every order ends in a consistent terminal state. When a step fails permanently, the workflow runs its compensations in reverse, so an order is never shipped without payment, nor charged without shipping. Transient failures self-heal through Temporal's activity retries. The injected faults include payment and inventory steps that take effect and then fail, and compensations that fail up to 8 times, more than a forward step's 5 attempts. The benchmark checks each order against the payment and inventory services' own records (charge and reservation still held or not), not just the workflow's result.
 
 ## What it is
 
