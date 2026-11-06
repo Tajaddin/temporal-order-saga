@@ -22,7 +22,7 @@ python -m benchmarks.saga_bench --count 200
 | Partial / inconsistent states | **0** |
 | **All-or-nothing rate** | **100%** |
 
-Every order ends in a consistent terminal state. When a step fails permanently, the workflow runs its compensations in reverse, so an order is never shipped without payment, nor charged without shipping. Transient failures self-heal through Temporal's activity retries.
+Every order ends in a consistent terminal state. When a step fails permanently, the workflow runs its compensations in reverse, so an order is never shipped without payment, nor charged without shipping. Transient failures self-heal through Temporal's activity retries. The benchmark checks each order against the payment and inventory services' own records (charge and reservation still held or not), not just the workflow's result.
 
 ## What it is
 
