@@ -67,10 +67,11 @@ async def charge_payment(req: OrderRequest, idempotency_key: str) -> str:
 
 
 @activity.defn
-async def refund_payment(req: OrderRequest, idempotency_key: str) -> None:
+async def refund_payment(req: OrderRequest, idempotency_key: str) -> bool:
+    """Refund the charge under the key; False if there was none to refund."""
     if _attempt_fails(req.order_id, "refund", req.compensation_failures):
         raise StepFailure(f"refund failed for {req.order_id}")
-    charges.pop(idempotency_key, None)
+    return charges.pop(idempotency_key, None) is not None
 
 
 @activity.defn
@@ -80,10 +81,11 @@ async def reserve_inventory(req: OrderRequest, idempotency_key: str) -> str:
 
 
 @activity.defn
-async def release_inventory(req: OrderRequest, idempotency_key: str) -> None:
+async def release_inventory(req: OrderRequest, idempotency_key: str) -> bool:
+    """Release the reservation under the key; False if there was none."""
     if _attempt_fails(req.order_id, "release", req.compensation_failures):
         raise StepFailure(f"release failed for {req.order_id}")
-    reservations.pop(idempotency_key, None)
+    return reservations.pop(idempotency_key, None) is not None
 
 
 @activity.defn

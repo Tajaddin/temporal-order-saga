@@ -95,7 +95,7 @@ pytest -q     # 9 tests
 - happy path completes with all three steps
 - transient payment failure recovers via retries
 - permanent inventory failure compensates the payment (charge then refund)
-- permanent payment failure leaves nothing charged
+- permanent payment failure leaves nothing charged, and the step log records no refund
 - permanent shipping failure releases inventory and refunds payment
 - a charge or reservation that took effect but never reported success is still rolled back
 - a compensation that fails more often than a forward step may retry still completes

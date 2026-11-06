@@ -50,6 +50,10 @@ def _reset():
     activities.reset_attempts()
 
 
+def _log(res: OrderResult) -> list[tuple[str, str]]:
+    return [(s.step, s.outcome) for s in res.steps]
+
+
 def _held(o: OrderRequest) -> tuple[bool, bool]:
     """Whether the order is still charged and still holds a reservation."""
     return (
@@ -81,10 +85,8 @@ async def test_permanent_inventory_failure_compensates_payment():
         res = await _run(env, order(fail_step="inventory", permanent_failure=True))
         assert res.status == "compensated"
         assert not res.shipment_id
-        # Payment was charged then refunded.
-        kinds = [(s.step, s.outcome) for s in res.steps]
-        assert ("payment", "ok") in kinds
-        assert ("payment", "compensated") in kinds
+        # Payment was charged then refunded; nothing was reserved to release.
+        assert _log(res) == [("payment", "ok"), ("payment", "compensated")]
 
 
 async def test_permanent_payment_failure_compensates_with_nothing_charged():
@@ -95,6 +97,7 @@ async def test_permanent_payment_failure_compensates_with_nothing_charged():
         assert not res.payment_id
         assert not res.shipment_id
         assert _held(o) == (False, False)
+        assert _log(res) == []  # nothing was charged, so nothing was refunded
 
 
 async def test_permanent_shipping_failure_releases_inventory_and_refunds():
@@ -129,6 +132,7 @@ async def test_step_that_took_effect_but_failed_is_rolled_back(step):
         res = await _run(env, o)
         assert res.status == "compensated"
         assert _held(o) == (False, False)
+        assert (step, "compensated") in _log(res)
 
 
 async def test_failing_compensation_is_retried_until_it_succeeds():

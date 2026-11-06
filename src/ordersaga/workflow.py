@@ -63,13 +63,15 @@ class OrderWorkflow:
 
         async def compensate() -> None:
             for step, undo, key in reversed(compensations):
-                await workflow.execute_activity(
+                undone = await workflow.execute_activity(
                     undo,
                     args=[req, key],
                     start_to_close_timeout=_TIMEOUT,
                     retry_policy=_COMPENSATION_RETRY,
                 )
-                result.steps.append(StepLog(step=step, outcome="compensated", detail=key))
+                # A step that failed before taking effect had nothing to undo.
+                if undone:
+                    result.steps.append(StepLog(step=step, outcome="compensated", detail=key))
 
         if self._cancelled:
             result.status = "cancelled"
