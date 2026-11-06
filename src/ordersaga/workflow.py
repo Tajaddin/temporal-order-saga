@@ -6,6 +6,11 @@ fails after retries, the workflow runs the registered compensations in reverse
 order and returns "compensated" -- never a partial state. A cancel signal
 compensates whatever has run so far and returns "cancelled".
 
+Each compensation is registered before its step runs, because a step can take
+effect and still fail (a timeout after the payment provider charged).
+Compensations retry until they succeed: giving up would leave the order half
+rolled back.
+
 Workflow code is deterministic: all side effects live in activities, and the
 only nondeterministic inputs (failure injection) are passed in the request.
 """
@@ -26,6 +31,13 @@ _RETRY = RetryPolicy(
     backoff_coefficient=2.0,
     maximum_interval=timedelta(milliseconds=50),
     maximum_attempts=5,
+)
+# No attempt limit: a failing refund keeps retrying (and shows up in the UI)
+# instead of ending the workflow with the customer still charged.
+_COMPENSATION_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    backoff_coefficient=2.0,
+    maximum_interval=timedelta(minutes=1),
 )
 _TIMEOUT = timedelta(seconds=10)
 
@@ -52,7 +64,10 @@ class OrderWorkflow:
         async def compensate() -> None:
             for step, undo, key in reversed(compensations):
                 await workflow.execute_activity(
-                    undo, args=[req, key], start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
+                    undo,
+                    args=[req, key],
+                    start_to_close_timeout=_TIMEOUT,
+                    retry_policy=_COMPENSATION_RETRY,
                 )
                 result.steps.append(StepLog(step=step, outcome="compensated", detail=key))
 
@@ -61,13 +76,14 @@ class OrderWorkflow:
             return result
 
         try:
+            # Compensating a step that never took effect is a no-op (same key).
+            compensations.append(("payment", activities.refund_payment, payment_key))
             payment_id = await workflow.execute_activity(
                 activities.charge_payment,
                 args=[req, payment_key],
                 start_to_close_timeout=_TIMEOUT,
                 retry_policy=_RETRY,
             )
-            compensations.append(("payment", activities.refund_payment, payment_key))
             result.payment_id = payment_id
             result.steps.append(StepLog(step="payment", outcome="ok", detail=payment_id))
 
@@ -76,13 +92,13 @@ class OrderWorkflow:
                 result.status = "cancelled"
                 return result
 
+            compensations.append(("inventory", activities.release_inventory, reservation_key))
             reservation_id = await workflow.execute_activity(
                 activities.reserve_inventory,
                 args=[req, reservation_key],
                 start_to_close_timeout=_TIMEOUT,
                 retry_policy=_RETRY,
             )
-            compensations.append(("inventory", activities.release_inventory, reservation_key))
             result.steps.append(StepLog(step="inventory", outcome="ok", detail=reservation_id))
 
             if self._cancelled:
@@ -99,7 +115,8 @@ class OrderWorkflow:
             return result
 
         except Exception:
-            # A step failed after exhausting retries: roll back everything done.
+            # A step failed after exhausting retries: roll back everything that
+            # may have taken effect.
             await compensate()
             result.status = "compensated"
             return result

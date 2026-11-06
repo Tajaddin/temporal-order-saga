@@ -1,6 +1,6 @@
 # temporal-order-saga
 
-> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (124 completed, 76 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 6 tests.
+> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (124 completed, 76 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 9 tests.
 
 [![ci](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -39,10 +39,13 @@ charge_payment ──ok──► reserve_inventory ──ok──► ship_order 
 | Concern | Implementation |
 |---|---|
 | Durable execution | Temporal persists workflow state; a worker crash resumes exactly where it left off (Temporal's core guarantee) |
-| Retries | `RetryPolicy(maximum_attempts=5)` per activity; transient failures recover without workflow code changes |
-| Compensation | Each completed step registers a compensation; on abort they run in reverse (refund payment, release inventory) |
+| Retries | `RetryPolicy(maximum_attempts=5)` per forward step; transient failures recover without workflow code changes |
+| Compensation | Each step registers its compensation *before* it runs, so a step that took effect but failed (a timeout after the card was charged) is still rolled back. On abort they run in reverse (refund payment, release inventory) and retry with no attempt limit until they succeed |
+| Idempotency | A step and its compensation share one idempotency key per order step: a retried charge charges once, and refunding a charge that never happened is a no-op |
 | Cancellation | A `cancel` signal compensates whatever has run and returns `cancelled` |
 | Determinism | All side effects live in activities; the workflow body is pure and replay-safe |
+
+Shipping is the last step and has no compensation, so the saga assumes a shipment that reports failure did not go out.
 
 ## Why this matters for hiring
 
@@ -56,7 +59,7 @@ Prerequisites: Python 3.10+; Docker (only for the real Temporal server stack). T
 
 ```bash
 pip install -e ".[dev]"
-pytest                                  # 6 tests on the time-skipping test server
+pytest                                  # 9 tests on the time-skipping test server
 python -m benchmarks.saga_bench --count 200   # all-or-nothing fault-injection hero
 docker compose up --build               # alt: Temporal server + UI + worker + Postgres
 ```
@@ -86,7 +89,7 @@ Watch executions, retries, and compensations live in the Temporal Web UI at http
 ## Testing
 
 ```bash
-pytest -q     # 6 tests
+pytest -q     # 9 tests
 ```
 
 - happy path completes with all three steps
@@ -94,7 +97,11 @@ pytest -q     # 6 tests
 - permanent inventory failure compensates the payment (charge then refund)
 - permanent payment failure leaves nothing charged
 - permanent shipping failure releases inventory and refunds payment
+- a charge or reservation that took effect but never reported success is still rolled back
+- a compensation that fails more often than a forward step may retry still completes
 - cancel signal never yields a partial ship
+
+The payment and inventory assertions read the in-memory services' records, so they fail if an order is left charged or reserved.
 
 All run on `WorkflowEnvironment.start_time_skipping()`, which downloads a local test server and skips retry backoff, so the suite is fast and needs no standing Temporal.
 

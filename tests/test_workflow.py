@@ -88,11 +88,13 @@ async def test_permanent_inventory_failure_compensates_payment():
 
 
 async def test_permanent_payment_failure_compensates_with_nothing_charged():
+    o = order(fail_step="payment", permanent_failure=True)
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        res = await _run(env, order(fail_step="payment", permanent_failure=True))
+        res = await _run(env, o)
         assert res.status == "compensated"
         assert not res.payment_id
         assert not res.shipment_id
+        assert _held(o) == (False, False)
 
 
 async def test_permanent_shipping_failure_releases_inventory_and_refunds():
@@ -117,3 +119,22 @@ async def test_cancel_signal_before_start_compensates():
         if res.shipment_id:
             assert res.status == "completed"
 
+
+@pytest.mark.parametrize("step", ["payment", "inventory"])
+async def test_step_that_took_effect_but_failed_is_rolled_back(step):
+    # Every attempt takes effect and then loses its response, like a timeout
+    # after the payment provider has already charged the card.
+    o = order(fail_step=step, permanent_failure=True, fail_after_effect=True)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        res = await _run(env, o)
+        assert res.status == "compensated"
+        assert _held(o) == (False, False)
+
+
+async def test_failing_compensation_is_retried_until_it_succeeds():
+    # Each compensation fails more times than a forward step may retry.
+    o = order(fail_step="shipping", permanent_failure=True, compensation_failures=8)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        res = await _run(env, o)
+        assert res.status == "compensated"
+        assert _held(o) == (False, False)
