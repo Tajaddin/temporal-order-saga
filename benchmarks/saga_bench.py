@@ -97,7 +97,9 @@ async def main_async(count: int) -> dict:
         "compensated": compensated,
         "terminal_total": total,
         "consistency_violations": consistency_violations,
-        "all_or_nothing_rate_pct": round(100 * (total - consistency_violations) / count, 2) if count else 0,
+        # Failed workflows are already left out of terminal_total and counted
+        # as violations, so the rate starts from every order run.
+        "all_or_nothing_rate_pct": round(100 * (count - consistency_violations) / count, 2) if count else 0,
     }
 
 

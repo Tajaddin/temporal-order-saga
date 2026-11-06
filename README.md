@@ -1,6 +1,6 @@
 # temporal-order-saga
 
-> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (128 completed, 72 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 9 tests.
+> Durable order-processing saga on Temporal: charge payment, reserve inventory, ship, with automatic compensation on failure and signal-based cancellation. **100% all-or-nothing outcome across 200 fault-injected runs (128 completed, 72 cleanly compensated, 0 partial states)**, run on Temporal's time-skipping test server. 10 tests.
 
 [![ci](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml/badge.svg)](https://github.com/Tajaddin/temporal-order-saga/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -59,7 +59,7 @@ Prerequisites: Python 3.10+; Docker (only for the real Temporal server stack). T
 
 ```bash
 pip install -e ".[dev]"
-pytest                                  # 9 tests on the time-skipping test server
+pytest                                  # 10 tests on the time-skipping test server
 python -m benchmarks.saga_bench --count 200   # all-or-nothing fault-injection hero
 docker compose up --build               # alt: Temporal server + UI + worker + Postgres
 ```
@@ -89,7 +89,7 @@ Watch executions, retries, and compensations live in the Temporal Web UI at http
 ## Testing
 
 ```bash
-pytest -q     # 9 tests
+pytest -q     # 10 tests
 ```
 
 - happy path completes with all three steps
@@ -100,6 +100,7 @@ pytest -q     # 9 tests
 - a charge or reservation that took effect but never reported success is still rolled back
 - a compensation that fails more often than a forward step may retry still completes
 - cancel signal never yields a partial ship
+- the benchmark counts a failed workflow once against the all-or-nothing rate
 
 The payment and inventory assertions read the in-memory services' records, so they fail if an order is left charged or reserved.
 
