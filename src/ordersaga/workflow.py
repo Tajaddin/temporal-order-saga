@@ -12,6 +12,7 @@ only nondeterministic inputs (failure injection) are passed in the request.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -41,21 +42,19 @@ class OrderWorkflow:
     @workflow.run
     async def run(self, req: OrderRequest) -> OrderResult:
         result = OrderResult(order_id=req.order_id, status="completed")
+        # Each step and its compensation share an idempotency key, so a retried
+        # step takes effect once and its compensation can find it by key.
+        payment_key = activities.idempotency_key(req.order_id, "payment")
+        reservation_key = activities.idempotency_key(req.order_id, "inventory")
         # Compensations to run (in reverse) if the saga aborts.
-        compensations: list[tuple[str, str]] = []  # (kind, id)
+        compensations: list[tuple[str, Any, str]] = []  # (step, activity, key)
 
         async def compensate() -> None:
-            for kind, ident in reversed(compensations):
-                if kind == "payment":
-                    await workflow.execute_activity(
-                        activities.refund_payment, ident, start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
-                    )
-                    result.steps.append(StepLog(step="payment", outcome="compensated", detail=ident))
-                elif kind == "inventory":
-                    await workflow.execute_activity(
-                        activities.release_inventory, ident, start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
-                    )
-                    result.steps.append(StepLog(step="inventory", outcome="compensated", detail=ident))
+            for step, undo, key in reversed(compensations):
+                await workflow.execute_activity(
+                    undo, args=[req, key], start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
+                )
+                result.steps.append(StepLog(step=step, outcome="compensated", detail=key))
 
         if self._cancelled:
             result.status = "cancelled"
@@ -63,9 +62,12 @@ class OrderWorkflow:
 
         try:
             payment_id = await workflow.execute_activity(
-                activities.charge_payment, req, start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
+                activities.charge_payment,
+                args=[req, payment_key],
+                start_to_close_timeout=_TIMEOUT,
+                retry_policy=_RETRY,
             )
-            compensations.append(("payment", payment_id))
+            compensations.append(("payment", activities.refund_payment, payment_key))
             result.payment_id = payment_id
             result.steps.append(StepLog(step="payment", outcome="ok", detail=payment_id))
 
@@ -75,9 +77,12 @@ class OrderWorkflow:
                 return result
 
             reservation_id = await workflow.execute_activity(
-                activities.reserve_inventory, req, start_to_close_timeout=_TIMEOUT, retry_policy=_RETRY
+                activities.reserve_inventory,
+                args=[req, reservation_key],
+                start_to_close_timeout=_TIMEOUT,
+                retry_policy=_RETRY,
             )
-            compensations.append(("inventory", reservation_id))
+            compensations.append(("inventory", activities.release_inventory, reservation_key))
             result.steps.append(StepLog(step="inventory", outcome="ok", detail=reservation_id))
 
             if self._cancelled:

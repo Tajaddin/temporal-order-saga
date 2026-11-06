@@ -50,12 +50,22 @@ def _reset():
     activities.reset_attempts()
 
 
+def _held(o: OrderRequest) -> tuple[bool, bool]:
+    """Whether the order is still charged and still holds a reservation."""
+    return (
+        activities.idempotency_key(o.order_id, "payment") in activities.charges,
+        activities.idempotency_key(o.order_id, "inventory") in activities.reservations,
+    )
+
+
 async def test_happy_path_completes():
+    o = order()
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        res = await _run(env, order())
+        res = await _run(env, o)
         assert res.status == "completed"
         assert res.payment_id and res.shipment_id
         assert [s.step for s in res.steps] == ["payment", "inventory", "shipping"]
+        assert _held(o) == (True, True)
 
 
 async def test_transient_payment_failure_recovers():
@@ -86,13 +96,15 @@ async def test_permanent_payment_failure_compensates_with_nothing_charged():
 
 
 async def test_permanent_shipping_failure_releases_inventory_and_refunds():
+    o = order(fail_step="shipping", permanent_failure=True)
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        res = await _run(env, order(fail_step="shipping", permanent_failure=True))
+        res = await _run(env, o)
         assert res.status == "compensated"
         assert not res.shipment_id
         outcomes = {(s.step, s.outcome) for s in res.steps}
         assert ("inventory", "compensated") in outcomes
         assert ("payment", "compensated") in outcomes
+        assert _held(o) == (False, False)
 
 
 async def test_cancel_signal_before_start_compensates():
@@ -104,3 +116,4 @@ async def test_cancel_signal_before_start_compensates():
         # Whatever the timing, the outcome is never a partial ship without record.
         if res.shipment_id:
             assert res.status == "completed"
+
