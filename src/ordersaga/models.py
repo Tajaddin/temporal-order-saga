@@ -14,6 +14,10 @@ class OrderRequest:
     fail_step: str = ""          # "payment" | "inventory" | "shipping" | ""
     transient_failures: int = 0  # transient errors before success
     permanent_failure: bool = False  # if True, the failing step never succeeds
+    # Payment/inventory only: each failing attempt first takes effect, then
+    # fails, like a timeout after the payment provider already charged.
+    fail_after_effect: bool = False
+    compensation_failures: int = 0  # transient errors per compensation before success
 
 
 @dataclass

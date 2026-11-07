@@ -1,10 +1,14 @@
 """Fault-injection benchmark for the saga's all-or-nothing guarantee.
 
 Runs N orders through the real workflow on Temporal's time-skipping test
-environment, injecting transient and permanent failures across random steps,
-and verifies every run ends in a consistent terminal state: either fully
-completed (payment + shipment) or fully compensated (no shipment). No partial
-state is ever observed.
+environment, injecting failures across random steps: transient and permanent
+ones, payment and inventory steps that take effect and then fail, and
+compensations that fail more often than a forward step may retry. It verifies
+every run ends in a consistent terminal state: either fully completed
+(payment + shipment, with the charge and the reservation held) or fully
+compensated (no shipment, nothing left charged or reserved). The charge and
+reservation are read from the in-memory services, not from the workflow's own
+result. A workflow that fails instead counts as a consistency violation.
 
     python -m benchmarks.saga_bench --count 200
 """
@@ -18,6 +22,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -60,17 +65,29 @@ async def main_async(count: int) -> dict:
                     fail_step=step,
                     transient_failures=transient,
                     permanent_failure=permanent,
+                    fail_after_effect=step in ("payment", "inventory") and rng.random() < 0.5,
+                    # A forward step gets 5 attempts; up to 8 failures exceeds that.
+                    compensation_failures=rng.randint(0, 8),
                 )
-                res = await env.client.execute_workflow(
-                    OrderWorkflow.run, req, id=f"b-{uuid.uuid4()}", task_queue=TASK_QUEUE
+                try:
+                    res = await env.client.execute_workflow(
+                        OrderWorkflow.run, req, id=f"b-{uuid.uuid4()}", task_queue=TASK_QUEUE
+                    )
+                except WorkflowFailureError:
+                    consistency_violations += 1
+                    continue
+                charged = activities.idempotency_key(req.order_id, "payment") in activities.charges
+                reserved = (
+                    activities.idempotency_key(req.order_id, "inventory") in activities.reservations
                 )
                 if res.status == "completed":
                     completed += 1
-                    if not (res.payment_id and res.shipment_id):
+                    if not (res.payment_id and res.shipment_id and charged and reserved):
                         consistency_violations += 1
                 elif res.status == "compensated":
                     compensated += 1
-                    if res.shipment_id:  # shipped but rolled back == partial state
+                    # Shipped, still charged, or still reserved after a rollback.
+                    if res.shipment_id or charged or reserved:
                         consistency_violations += 1
 
     total = completed + compensated
@@ -80,7 +97,9 @@ async def main_async(count: int) -> dict:
         "compensated": compensated,
         "terminal_total": total,
         "consistency_violations": consistency_violations,
-        "all_or_nothing_rate_pct": round(100 * (total - consistency_violations) / count, 2) if count else 0,
+        # Failed workflows are already left out of terminal_total and counted
+        # as violations, so the rate starts from every order run.
+        "all_or_nothing_rate_pct": round(100 * (count - consistency_violations) / count, 2) if count else 0,
     }
 
 

@@ -6,7 +6,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY README.md ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 app
+USER app
 
 # Runs the worker; point it at the server via TEMPORAL_ADDRESS.
 ENV TEMPORAL_ADDRESS=temporal:7233
